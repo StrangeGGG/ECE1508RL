@@ -1,0 +1,7 @@
+TRAFFIC SIMULATION RESULTS
+==================================================
+Total simulation steps: 1001
+Total vehicles passed: 109
+Final average waiting time: 82.98 steps
+Final throughput: 0.1089 vehicles/step
+
