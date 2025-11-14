@@ -12,14 +12,17 @@ class Vehicle:
         self.id = vehicle_id
         self.direction = direction  # 'north', 'south', 'east', 'west'
         self.lane_type = lane_type  # 'straight', 'left'
+        self.prev_x, self.prev_y = 0.0, 0.0
         self.spawn_time = spawn_time
         self.waiting_time = 0
         self.passed = False
+        self.has_turned = False
         self.collided = False
         self.in_intersection_zone = False
 
         # Initial position and speed
         self.set_initial_position()
+        self.prev_x, self.prev_y = self.x, self.y
         self.speed = 1.5  # Initial speed
         self.max_speed = 2.5
         self.acceleration = 0.1
@@ -52,6 +55,39 @@ class Vehicle:
                 self.y = 20  # Westbound left turn lane
             self.x = 80
 
+    def _crossed_centerline(self) -> bool:
+        if self.direction == 'north':
+            return self.prev_y < 0 <= self.y
+        if self.direction == 'south':
+            return self.prev_y > 0 >= self.y
+        if self.direction == 'east':
+            return self.prev_x < 0 <= self.x
+        if self.direction == 'west':
+            return self.prev_x > 0 >= self.x
+        return False
+
+    def _should_turn_left_now(self) -> bool:
+        """Decide when to perform the instantaneous left turn for left-lane vehicles."""
+        if self.lane_type != 'left' or self.has_turned:
+            return False
+
+        # Tolerances
+        center_tol = 6.0     # closeness to intersection centerline along travel axis
+        lane_tol = 4.0       # closeness to the left-lane offset
+
+        if not (abs(self.x) <= 30 and abs(self.y) <= 30):
+            return False
+        
+        if self.direction == 'north':   # left lane ~ x = -20; turn when near/after y≈0
+            return abs(self.x + 20) < lane_tol and self.y >= -center_tol
+        if self.direction == 'south':   # left lane ~ x = +20; turn when near/after y≈0
+            return abs(self.x - 20) < lane_tol and self.y <=  center_tol
+        if self.direction == 'east':    # left lane ~ y = -20; turn when near/after x≈0
+            return abs(self.y + 20) < lane_tol and self.x >= -center_tol
+        if self.direction == 'west':    # left lane ~ y = +20; turn when near/after x≈0
+            return abs(self.y - 20) < lane_tol and self.x <=  center_tol
+        return False
+
     def update(self, current_phase, intersection_clear):
         """Update vehicle state"""
         if self.passed or self.collided:
@@ -74,6 +110,10 @@ class Vehicle:
         else:
             # Can proceed, accelerate
             self.speed = min(self.max_speed, self.speed + self.acceleration)
+
+        # If this is a left-turn vehicle, turn once when it reaches its lane's centerline
+        if (not should_wait) and self._should_turn_left_now():
+            self._turn_left()
 
         # Update position
         self.move()
@@ -117,7 +157,7 @@ class Vehicle:
 
     def in_intersection(self):
         """Check if vehicle is in intersection area"""
-        return abs(self.x) < 20 and abs(self.y) < 20
+        return abs(self.x) <= 30 and abs(self.y) <= 30
 
     def move(self):
         """Move vehicle based on direction"""
@@ -129,6 +169,8 @@ class Vehicle:
             self.x += self.speed
         elif self.direction == 'west':
             self.x -= self.speed
+        
+        self.prev_x, self.prev_y = self.x, self.y
 
     def check_passed(self):
         """Check if vehicle has passed the intersection"""
@@ -141,6 +183,22 @@ class Vehicle:
                     (self.direction == 'west' and self.x < -60):
                 self.passed = True
 
+    def _turn_left(self):
+        """Instant left into a safe point aligned with the outbound left-turn lane."""
+        # pick a point slightly inside the box so we don't sweep through straight queues
+        if self.direction == 'north':        # to WEST
+            self.direction = 'west'
+            self.x, self.y = -5.0, 20.0      # x near center, y on westbound-left lane
+        elif self.direction == 'south':      # to EAST
+            self.direction = 'east'
+            self.x, self.y =  5.0, -20.0
+        elif self.direction == 'east':       # to NORTH
+            self.direction = 'north'
+            self.x, self.y = -20.0, -5.0
+        elif self.direction == 'west':       # to SOUTH
+            self.direction = 'south'
+            self.x, self.y =  20.0,  5.0
+        self.has_turned = True
 
 class TrafficMetricsCollector:
     """Collects traffic performance metrics"""
