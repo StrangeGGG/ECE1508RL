@@ -321,9 +321,9 @@ class TrafficRLWrapper:
 
     def reset(self):
         self.sim.reset()
-        self.last_action = 0
-        self.force_action_steps = 0
-        self.current_phase = 0
+        self.current_phase = random.randrange(self.action_size)
+        self.last_action = self.current_phase
+        self.force_action_steps = self.min_phase_steps
         self.phase_duration = 0
         self.last_metrics = {'total_vehicles_passed': 0}
         return self.get_state()
@@ -414,16 +414,33 @@ class TrafficRLWrapper:
          - penalize if phase_duration > max_phase_steps
          - finally clip to [-5, +5]
         """
+
+        # Default: Original presets
+        # A: Balanced presets
+        # B: Throughput-focused presets
+        # C: Waiting-Time minimizer presets
+
         q_dict = metrics.get('queue_lengths', {})
         total_queue = sum(q_dict.values()) if q_dict else 0
-        queue_penalty = -0.06 * total_queue
+        #queue_penalty = -0.06 * total_queue 
+        #queue_penalty = -0.05 * total_queue # Default
+        #queue_penalty = -0.015 * total_queue # A
+        #queue_penalty = -0.01 * total_queue # B
+        queue_penalty = -0.02 * total_queue # C
 
         wait_inc = metrics.get('wait_time_increase', 0)
-        wait_penalty = -0.04 * wait_inc
+        #wait_penalty = -0.02 * wait_inc # Default
+        #wait_penalty = -0.04 * wait_inc # A
+        #wait_penalty = -0.025 * wait_inc # B
+        wait_penalty = -0.06 * wait_inc # C
+        
 
         passed_old = last_metrics.get('total_vehicles_passed', 0)
         passed_new = metrics.get('total_vehicles_passed', 0)
-        passed_reward = (passed_new - passed_old) * 1.0
+        #passed_reward = (passed_new - passed_old) * 1.0 # Default
+        #passed_reward = (passed_new - passed_old) * 1.5 # A
+        #passed_reward = (passed_new - passed_old) * 2.5 # B
+        passed_reward = (passed_new - passed_old) * 1.0 # C
 
         phase_penalty = -1.0 if self.phase_duration > self.max_phase_steps else 0.0
 

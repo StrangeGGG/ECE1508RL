@@ -20,9 +20,9 @@ def train(episodes=300, max_steps=800, save_model_path="traffic_dqn.pth"):
     action_size = env.action_size
 
     agent = DQNAgent(state_size, action_size,
-                     lr=1e-4, gamma=0.98, batch_size=128,
+                     lr=5e-5, gamma=0.95, batch_size=128,
                      eps_start=1.0, eps_end=0.1, eps_decay=0.9995,
-                     update_every=10)
+                     update_every=100)
 
     scores = []
     avg_scores = []

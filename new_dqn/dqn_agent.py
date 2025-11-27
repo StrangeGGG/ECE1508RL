@@ -6,18 +6,30 @@ import torch.nn as nn
 import torch.optim as optim
 from collections import deque
 
-class DQN(nn.Module):
+class DuelingDQN(nn.Module):
     def __init__(self, state_size, action_size, hidden1=256, hidden2=128):
-        super(DQN, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(state_size, hidden1)
         self.fc2 = nn.Linear(hidden1, hidden2)
-        self.fc3 = nn.Linear(hidden2, action_size)
         self.relu = nn.ReLU()
+
+        # Value stream
+        self.value = nn.Linear(hidden2, 1)
+
+        # Advantage stream
+        self.advantage = nn.Linear(hidden2, action_size)
 
     def forward(self, x):
         x = self.relu(self.fc1(x))
         x = self.relu(self.fc2(x))
-        return self.fc3(x)
+
+        V = self.value(x)                     # shape (B, 1)
+        A = self.advantage(x)                 # shape (B, action_size)
+
+        # Combine into Q-values
+        Q = V + (A - A.mean(dim=1, keepdim=True))
+        return Q
+
 
 class ReplayBuffer:
     def __init__(self, capacity=50000):
@@ -37,15 +49,15 @@ class ReplayBuffer:
 
 class DQNAgent:
     def __init__(self, state_size, action_size, device=None,
-                 lr=1e-4, gamma=0.98, batch_size=128, buffer_size=50000,
-                 eps_start=1.0, eps_end=0.1, eps_decay=0.9995, update_every=10, max_grad_norm=1.0, global_step=0,
+                 lr=5e-5, gamma=0.95, batch_size=128, buffer_size=50000,
+                 eps_start=1.0, eps_end=0.1, eps_decay=0.9995, update_every=100, max_grad_norm=1.0, global_step=0,
                  eps_decay_steps=300000):
         self.state_size = state_size
         self.action_size = action_size
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.online = DQN(state_size, action_size).to(self.device)
-        self.target = DQN(state_size, action_size).to(self.device)
+        self.online = DuelingDQN(state_size, action_size).to(self.device)
+        self.target = DuelingDQN(state_size, action_size).to(self.device)
         self.target.load_state_dict(self.online.state_dict())
 
         self.optimizer = optim.Adam(self.online.parameters(), lr=lr)
