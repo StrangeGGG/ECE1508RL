@@ -203,7 +203,8 @@ class Vehicle:
 class TrafficMetricsCollector:
     """Collects traffic performance metrics"""
 
-    def __init__(self):
+    def __init__(self, sensor_noise_std: float = 0.0):
+        self.sensor_noise_std = sensor_noise_std
         self.reset()
 
     def reset(self):
@@ -288,7 +289,14 @@ class TrafficMetricsCollector:
         for direction in ['north', 'south', 'east', 'west']:
             for lane_type in ['straight', 'left']:
                 key = f'{direction}_{lane_type}'
-                metrics['queue_lengths'][key] = np.mean(self.queue_lengths[key]) if self.queue_lengths[key] else 0
+                true_mean = np.mean(self.queue_lengths[key]) if self.queue_lengths[key] else 0.0
+
+                if self.sensor_noise_std > 0.0:
+                    noisy = true_mean + np.random.normal(0.0, self.sensor_noise_std)
+                    noisy = max(0.0, noisy)  # no negative counts
+                    metrics['queue_lengths'][key] = noisy
+                else:
+                    metrics['queue_lengths'][key] = true_mean
 
         # Throughput
         metrics['throughput'] = self.throughputs[-1] if self.throughputs else 0
@@ -299,28 +307,20 @@ class TrafficMetricsCollector:
 
         return metrics
 
-
-class TrafficSimulation:
+class TrafficSimulation_ideal:
     """Traffic simulation environment"""
 
     def __init__(self):
         self.vehicles = {}
         self.next_vehicle_id = 0
         self.current_step = 0
-        self.metrics_collector = TrafficMetricsCollector()
-
+        self.metrics_collector = TrafficMetricsCollector(sensor_noise_std=0.0)
         # Vehicle spawn probabilities
-        #self.spawn_probabilities = {
-        #    'north': {'straight': 0.04, 'left': 0.03},
-        #    'south': {'straight': 0.04, 'left': 0.03},
-        #    'east': {'straight': 0.04, 'left': 0.03},
-        #    'west': {'straight': 0.04, 'left': 0.03}
-        #}
-        self.spawn_probabilities = {
-            'north': {'straight': 0.1, 'left': 0.05},
-            'south': {'straight': 0.1, 'left': 0.05},
-            'east': {'straight': 0.1, 'left': 0.05},
-            'west': {'straight': 0.1, 'left': 0.05}
+        self.spawn_prob = {
+            'north': {'straight': 0.05, 'left': 0.02},
+            'south': {'straight': 0.05, 'left': 0.02},
+            'east': {'straight': 0.05, 'left': 0.02},
+            'west': {'straight': 0.05, 'left': 0.02}
         }
         # Track passed vehicles
         self.total_passed_vehicles = 0
@@ -364,7 +364,122 @@ class TrafficSimulation:
         """Spawn new vehicles based on probability"""
         for direction in ['north', 'south', 'east', 'west']:
             for lane_type in ['straight', 'left']:
-                prob = self.spawn_probabilities[direction][lane_type]
+                prob = self.spawn_prob[direction][lane_type]
+                if random.random() < prob:
+                    # Check if lane already has waiting vehicles
+                    lane_vehicles = [v for v in self.vehicles.values()
+                                     if v.direction == direction and v.lane_type == lane_type
+                                     and not v.passed and not v.collided]
+                    if len(lane_vehicles) < 4:
+                        self.add_vehicle(direction, lane_type)
+
+    def add_vehicle(self, direction, lane_type):
+        """Add new vehicle to simulation"""
+        vehicle = Vehicle(self.next_vehicle_id, direction, lane_type, self.current_step)
+        self.vehicles[self.next_vehicle_id] = vehicle
+        self.next_vehicle_id += 1
+
+    def collect_metrics(self, current_phase, passed_this_step):
+        """Collect traffic metrics"""
+        vehicles_info = {}
+        for vehicle_id, vehicle in self.vehicles.items():
+            vehicles_info[vehicle_id] = {
+                'x': vehicle.x, 'y': vehicle.y,
+                'direction': vehicle.direction,
+                'lane_type': vehicle.lane_type,
+                'waiting_time': vehicle.waiting_time,
+                'speed': vehicle.speed,
+                'passed': vehicle.passed
+            }
+
+        self.metrics_collector.update_metrics(vehicles_info, current_phase,
+                                              self.current_step, passed_this_step,
+                                              self.total_passed_vehicles)
+
+    def get_observation(self):
+        """Get current observation state"""
+        return list(self.vehicles.values())
+
+    def get_metrics(self):
+        """Get current metrics"""
+        return self.metrics_collector.get_metrics()
+
+class TrafficSimulation_realistic:
+    """Traffic simulation environment"""
+
+    def __init__(self, peak_steps=None, sensor_noise_std: float = 0.0):
+        self.vehicles = {}
+        self.next_vehicle_id = 0
+        self.current_step = 0
+        self.metrics_collector = TrafficMetricsCollector(sensor_noise_std=sensor_noise_std)
+        # Vehicle spawn probabilities
+        self.spawn_probabilities_offpeak = {
+            'north': {'straight': 0.05, 'left': 0.02},
+            'south': {'straight': 0.05, 'left': 0.02},
+            'east': {'straight': 0.05, 'left': 0.02},
+            'west': {'straight': 0.05, 'left': 0.02}
+        }
+        self.spawn_probabilities_peak = {
+            'north': {'straight': 0.1, 'left': 0.05},
+            'south': {'straight': 0.1, 'left': 0.05},
+            'east': {'straight': 0.1, 'left': 0.05},
+            'west': {'straight': 0.1, 'left': 0.05}
+        }
+        # Track passed vehicles
+        self.total_passed_vehicles = 0
+        self.peak_steps = peak_steps if peak_steps is not None else 1000
+
+    def reset(self):
+        """Reset simulation"""
+        self.vehicles = {}
+        self.next_vehicle_id = 0
+        self.current_step = 0
+        self.total_passed_vehicles = 0
+        self.metrics_collector.reset()
+
+    def step(self, current_phase):
+        """Execute one simulation step"""
+        self.current_step += 1
+
+        # Spawn new vehicles
+        self.spawn_vehicles()
+
+        # Update all vehicles
+        vehicles_to_remove = []
+        passed_count = 0
+
+        for vehicle_id, vehicle in self.vehicles.items():
+            vehicle.update(current_phase, True)
+            if vehicle.passed:
+                vehicles_to_remove.append(vehicle_id)
+                passed_count += 1
+
+        # Remove passed vehicles and update statistics
+        for vehicle_id in vehicles_to_remove:
+            del self.vehicles[vehicle_id]
+        self.total_passed_vehicles += passed_count
+
+        # Collect metrics
+        self.collect_metrics(current_phase, passed_count)
+
+        return self.get_observation(), self.get_metrics()
+
+    def get_current_spawn_probs(self):
+        """
+        Decide whether we are in peak or off-peak period based on current_step.
+        If peak_steps is None, default to off-peak all the time.
+        """
+        if self.peak_steps is not None and self.current_step <= self.peak_steps:
+            return self.spawn_probabilities_peak
+        else:
+            return self.spawn_probabilities_offpeak
+
+    def spawn_vehicles(self):
+        """Spawn new vehicles based on probability"""
+        current_probs = self.get_current_spawn_probs()
+        for direction in ['north', 'south', 'east', 'west']:
+            for lane_type in ['straight', 'left']:
+                prob = current_probs[direction][lane_type]
                 if random.random() < prob:
                     # Check if lane already has waiting vehicles
                     lane_vehicles = [v for v in self.vehicles.values()

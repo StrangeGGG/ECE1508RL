@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import random
 import torch
 
-from traffic_env import TrafficEngine
+from traffic_env import TrafficEngine_ideal, TrafficEngine_realistic
 from dqn_agent import DQNAgent
 
 # reproducibility
@@ -15,7 +15,9 @@ torch.manual_seed(SEED)
 
 
 def train(episodes=300, max_steps=800, save_model_path="traffic_dqn.pth"):
-    env = TrafficEngine(seed=SEED)
+    # Switching environment  
+    #env = TrafficEngine_ideal(seed=SEED)
+    env = TrafficEngine_realistic(peak_steps=1000, seed=SEED, sensor_noise_std=0.5)
     state = env.reset()
     state_size = len(state)
     action_size = env.action_size
@@ -168,7 +170,7 @@ def test(agent, env, max_steps=1000):
 
     plt.subplot(2, 1, 2)
     plt.plot(waits)
-    plt.title("Waiting time")
+    plt.title("Average Waiting Time")
 
     plt.tight_layout()
     plt.savefig("test_results.png", dpi=200)

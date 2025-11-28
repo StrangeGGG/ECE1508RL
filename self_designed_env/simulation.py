@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.patches import Rectangle
-from new_env import TrafficSimulation, TrafficMetricsCollector
+from new_env import TrafficSimulation_ideal, TrafficSimulation_realistic, TrafficMetricsCollector
 #from fixedtime_controller import FixedTimeTrafficLight
 from fixed_timing_Tianrui import FixedCycleTrafficLight as FixedTimeTrafficLight
 
@@ -199,7 +199,10 @@ def run_simulation():
     print("=" * 50)
 
     # Create simulation environment and traffic light
-    simulation = TrafficSimulation()
+    # Switching environment 
+    simulation = TrafficSimulation_ideal()
+    #simulation = TrafficSimulation_realistic(peak_steps=1000, sensor_noise_std=0.5)
+
     """ Version from Mingjie"""
     #traffic_light = FixedTimeTrafficLight(phase_durations=[80, 80, 50, 50])
     """ Version from Tianrui"""
