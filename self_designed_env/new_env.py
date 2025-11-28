@@ -310,13 +310,18 @@ class TrafficSimulation:
         self.metrics_collector = TrafficMetricsCollector()
 
         # Vehicle spawn probabilities
+        #self.spawn_probabilities = {
+        #    'north': {'straight': 0.04, 'left': 0.03},
+        #    'south': {'straight': 0.04, 'left': 0.03},
+        #    'east': {'straight': 0.04, 'left': 0.03},
+        #    'west': {'straight': 0.04, 'left': 0.03}
+        #}
         self.spawn_probabilities = {
-            'north': {'straight': 0.04, 'left': 0.03},
-            'south': {'straight': 0.04, 'left': 0.03},
-            'east': {'straight': 0.04, 'left': 0.03},
-            'west': {'straight': 0.04, 'left': 0.03}
+            'north': {'straight': 0.1, 'left': 0.05},
+            'south': {'straight': 0.1, 'left': 0.05},
+            'east': {'straight': 0.1, 'left': 0.05},
+            'west': {'straight': 0.1, 'left': 0.05}
         }
-
         # Track passed vehicles
         self.total_passed_vehicles = 0
 
