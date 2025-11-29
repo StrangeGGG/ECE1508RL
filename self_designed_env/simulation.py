@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.patches import Rectangle
-from new_env import TrafficSimulation, TrafficMetricsCollector
+from new_env import TrafficSimulation_ideal, TrafficSimulation_realistic, TrafficMetricsCollector
 #from fixedtime_controller import FixedTimeTrafficLight
 from fixed_timing_Tianrui import FixedCycleTrafficLight as FixedTimeTrafficLight
 
@@ -28,14 +28,14 @@ class TrafficVisualizer:
         self.draw_roads_and_lanes()
 
         # Waiting time chart
-        self.ax2.set_title('Average Waiting Time Over Time')
+        self.ax2.set_title('Average Waiting Time')
         self.ax2.set_xlabel('Simulation Steps')
         self.ax2.set_ylabel('Waiting Time (steps)')
         self.ax2.grid(True, alpha=0.3)
-        self.ax2.set_ylim(0, 100)  # Set appropriate y-axis range
+        self.ax2.set_ylim(0, 150)  # Set appropriate y-axis range
 
         # Throughput chart
-        self.ax3.set_title('Throughput Over Time')
+        self.ax3.set_title('Throughput')
         self.ax3.set_xlabel('Simulation Steps')
         self.ax3.set_ylabel('Throughput (vehicles/step)')
         self.ax3.grid(True, alpha=0.3)
@@ -50,8 +50,8 @@ class TrafficVisualizer:
         self.waiting_line, = self.ax2.plot([], [], 'b-', linewidth=2, label='Waiting Time')
         self.ax2.legend()
 
-        # Throughput curve (green)
-        self.throughput_line, = self.ax3.plot([], [], 'g-', linewidth=2, label='Throughput')
+        # Throughput curve (blue)
+        self.throughput_line, = self.ax3.plot([], [], 'b-', linewidth=2, label='Throughput')
         self.ax3.legend()
 
         plt.tight_layout()
@@ -158,7 +158,19 @@ class TrafficVisualizer:
         return self.ax1.collections + [self.waiting_line, self.throughput_line]
 
     def save_plots(self):
-        """Save charts to files"""
+        # Save throughput chart
+        fig_throughput, ax_throughput = plt.subplots(figsize=(10, 6))
+        ax_throughput.plot(self.steps, self.throughputs, 'b-', linewidth=2, label='Throughput')
+        ax_throughput.set_title('Throughput Over Time')
+        ax_throughput.set_xlabel('Simulation Steps')
+        ax_throughput.set_ylabel('Throughput (vehicles/step)')
+        ax_throughput.grid(True, alpha=0.3)
+        ax_throughput.legend()
+        plt.tight_layout()
+        plt.savefig('throughput_plot.png', dpi=300, bbox_inches='tight')
+        plt.close(fig_throughput)
+        print("Saved throughput_plot.png")
+
         # Save waiting time chart
         fig_waiting, ax_waiting = plt.subplots(figsize=(10, 6))
         ax_waiting.plot(self.steps, self.waiting_times, 'b-', linewidth=2, label='Waiting Time')
@@ -171,19 +183,6 @@ class TrafficVisualizer:
         plt.savefig('waiting_time_plot.png', dpi=300, bbox_inches='tight')
         plt.close(fig_waiting)
         print("Saved waiting_time_plot.png")
-
-        # Save throughput chart
-        fig_throughput, ax_throughput = plt.subplots(figsize=(10, 6))
-        ax_throughput.plot(self.steps, self.throughputs, 'g-', linewidth=2, label='Throughput')
-        ax_throughput.set_title('Throughput Over Time')
-        ax_throughput.set_xlabel('Simulation Steps')
-        ax_throughput.set_ylabel('Throughput (vehicles/step)')
-        ax_throughput.grid(True, alpha=0.3)
-        ax_throughput.legend()
-        plt.tight_layout()
-        plt.savefig('throughput_plot.png', dpi=300, bbox_inches='tight')
-        plt.close(fig_throughput)
-        print("Saved throughput_plot.png")
 
 
 def run_simulation():
@@ -200,7 +199,10 @@ def run_simulation():
     print("=" * 50)
 
     # Create simulation environment and traffic light
-    simulation = TrafficSimulation()
+    # Switching environment 
+    simulation = TrafficSimulation_ideal()
+    #simulation = TrafficSimulation_realistic(peak_steps=1000, sensor_noise_std=0.5)
+
     """ Version from Mingjie"""
     #traffic_light = FixedTimeTrafficLight(phase_durations=[80, 80, 50, 50])
     """ Version from Tianrui"""
@@ -209,7 +211,7 @@ def run_simulation():
 
     # Run animation
     ani = animation.FuncAnimation(
-        visualizer.fig, visualizer.update, frames=1000,
+        visualizer.fig, visualizer.update, frames=2000,
         interval=100, blit=False, repeat=False
     )
 

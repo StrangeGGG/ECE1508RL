@@ -9,10 +9,10 @@ class FixedCycleTrafficLight:
     def __init__(self):
             
         phases = [
-                {'name': 'NS_Straight', 'duration': 60, 'green_directions': ['N', 'S']},
-                {'name': 'EW_Straight', 'duration': 60, 'green_directions': ['E', 'W']},
-                {'name': 'NS_Left', 'duration': 40, 'green_directions': ['N_left', 'S_left']},
-                {'name': 'EW_Left', 'duration': 40, 'green_directions': ['E_left', 'W_left']},
+                {'name': 'NS_Straight', 'duration': 100, 'green_directions': ['N', 'S']},
+                {'name': 'EW_Straight', 'duration': 100, 'green_directions': ['E', 'W']},
+                {'name': 'NS_Left', 'duration': 80, 'green_directions': ['N_left', 'S_left']},
+                {'name': 'EW_Left', 'duration': 80, 'green_directions': ['E_left', 'W_left']},
                 ]
 
         self.phases = phases
