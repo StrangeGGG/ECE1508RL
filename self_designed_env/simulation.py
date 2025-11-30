@@ -4,6 +4,7 @@ from matplotlib.patches import Rectangle
 from new_env import TrafficSimulation_ideal, TrafficSimulation_realistic, TrafficMetricsCollector
 #from fixedtime_controller import FixedTimeTrafficLight
 from fixed_timing_Tianrui import FixedCycleTrafficLight as FixedTimeTrafficLight
+import numpy as np
 
 class TrafficVisualizer:
     """Traffic visualization class"""
@@ -183,6 +184,35 @@ class TrafficVisualizer:
         plt.savefig('waiting_time_plot.png', dpi=300, bbox_inches='tight')
         plt.close(fig_waiting)
         print("Saved waiting_time_plot.png")
+    
+    def compute_tail_stats(self, tail_frac=0.3):
+        """Compute statistics over the last `tail_frac` portion of the simulation."""
+        if not self.steps:
+            print("No data recorded, cannot compute tail stats.")
+            return None
+
+        n = len(self.steps)
+        tail_len = max(1, int(n * tail_frac))
+
+        tail_waits = self.waiting_times[-tail_len:]
+        tail_thrs = self.throughputs[-tail_len:]
+
+        mean_tail_wait = float(np.mean(tail_waits))
+        mean_tail_thr = float(np.mean(tail_thrs))
+
+        print("\n=== Fixed-Timing Last 30% Stats ===")
+        print(f"Total steps recorded: {n}")
+        print(f"Last {tail_len} steps (~{tail_frac*100:.0f}%):")
+        print(f"Tail avg throughput:    {mean_tail_thr:.4f} vehicles/step")
+        print(f"Tail avg waiting time:  {mean_tail_wait:.2f} steps")
+        print("===================================\n")
+
+        return {
+            "tail_len": tail_len,
+            "total_steps": n,
+            "tail_avg_throughput": mean_tail_thr,
+            "tail_avg_wait": mean_tail_wait,
+        }
 
 
 def run_simulation():
@@ -216,6 +246,8 @@ def run_simulation():
     )
 
     plt.show()
+    # Compute tail statistics
+    tail_stats = visualizer.compute_tail_stats(tail_frac=0.3)
 
     # Final statistics
     print("\n" + "=" * 50)
@@ -236,6 +268,7 @@ def run_simulation():
         # f.write("\nAverage Queue Lengths by Lane:\n")
         # for lane, length in final_metrics['queue_lengths'].items():
         #     f.write(f"  {lane}: {length:.2f} vehicles\n")
+        
 
     print("Saved simulation_results.txt")
 
@@ -244,6 +277,13 @@ def run_simulation():
     print(f"Total vehicles passed: {final_metrics['total_vehicles_passed']}")
     print(f"Final average waiting time: {final_metrics['average_waiting_time']:.2f} steps")
     print(f"Final throughput: {final_metrics['throughput']:.4f} vehicles/step")
+
+    print("\n=== Fixed-Timing Last 30% Stats ===")
+    print(f"Total steps recorded: {tail_stats['total_steps']}")
+    print(f"Last {tail_stats['tail_len']} steps (~30%):")
+    print(f"Tail avg throughput:    {tail_stats['tail_avg_throughput']:.4f} vehicles/step")
+    print(f"Tail avg waiting time:  {tail_stats['tail_avg_wait']:.2f} steps")
+    print("===================================\n")
 
     return simulation
 

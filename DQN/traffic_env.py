@@ -560,24 +560,42 @@ class TrafficEngine_realistic:
 
     def _compute_reward(self, last_metrics, metrics):
         qdict = metrics.get('queue_lengths', {})
-        total_queue = sum(qdict.values()) if qdict else 0
+        queues = list(qdict.values()) if qdict else [0]
+        total_queue = float(sum(queues))
+        max_queue = float(max(queues))
 
         current_total_wait = metrics.get('total_wait', 0)
         last_total_wait = last_metrics.get('total_wait', 0)
         wait_increase = current_total_wait - last_total_wait
+        avg_wait = metrics.get('avg_wait', 0.0)
 
         current_throughput = metrics.get('throughput', 0)
         last_throughput = last_metrics.get('throughput', 0)
         throughput_improvement = current_throughput - last_throughput
 
-        # reward = (-0.05 * float(total_queue)
-        #           - 0.005 * wait_increase
-        #           + 0.5 * metrics['throughput'])
-        reward = (-0.05 * float(total_queue)
+        imbalance_penalty = max_queue - (total_queue / len(queues))
+
+        # === A. Original reward function===
+        reward = (-0.05 * total_queue
                   - 0.005 * wait_increase
                   + 1.0 * throughput_improvement
                   + 0.5 * current_throughput)
+        
+        # === B. Stable reward function(without throughput improvement)===
+        #reward = (-0.1 * total_queue
+        #          - 0.05 * wait_increase
+        #          + 1 * current_throughput)
 
+        # === C. Delay-oriented reward function===
+        #reward = (-0.2 * avg_wait
+        #          + 0.5 * current_throughput)
+
+        # === D. Balanced queue reward function===
+        #reward = (-0.05 * total_queue
+        #          - 0.05 * avg_wait
+        #          - 0.05 * imbalance_penalty
+        #          + 1 * current_throughput)
+        
         return float(np.clip(reward, -2.0, 2.0))
 
     # ------------------ State ------------------

@@ -158,11 +158,30 @@ def test(agent, env, max_steps=1000):
         thr.append(info.get("throughput", 0.0))
         waits.append(info.get("avg_wait", 0.0))
 
-    print(
-        "Test done: avg_throughput=%.4f avg_wait=%.2f phase_changes=%d"
-        % (np.mean(thr), np.mean(waits), len(phase_changes))
-    )
+    # ============================
+    #  Last 30% statistics
+    # ============================
+    n = len(thr)
+    tail_len = max(1, int(n * 0.3))
 
+    tail_thr = thr[-tail_len:]
+    tail_wait = waits[-tail_len:]
+
+    mean_tail_thr = float(np.mean(tail_thr))
+    mean_tail_wait = float(np.mean(tail_wait))
+
+    print("=== Test Performance Summary ===")
+    print(f"Total Steps: {n}")
+    print(f"Last 30% Steps: {tail_len}")
+    print(f"Overall avg throughput: {np.mean(thr):.4f}")
+    print(f"Overall avg wait:       {np.mean(waits):.2f}")
+    print("--- Last 30% performance ---")
+    print(f"Tail avg throughput:    {mean_tail_thr:.4f}")
+    print(f"Tail avg wait:          {mean_tail_wait:.2f}")
+    print(f"Phase changes:          {len(phase_changes)}")
+    print("================================")
+
+    # plot
     plt.figure(figsize=(10, 4))
     plt.subplot(2, 1, 1)
     plt.plot(thr)
@@ -176,8 +195,17 @@ def test(agent, env, max_steps=1000):
     plt.savefig("test_results.png", dpi=200)
     plt.show()
 
-    return thr, waits, phase_changes
+    # return stats for external comparison
+    tail_stats = {
+        "tail_thr": mean_tail_thr,
+        "tail_wait": mean_tail_wait,
+        "tail_len": tail_len,
+        "overall_thr": float(np.mean(thr)),
+        "overall_wait": float(np.mean(waits)),
+        "phase_changes": len(phase_changes),
+    }
 
+    return thr, waits, phase_changes, tail_stats
 
 if __name__ == "__main__":
     agent, env, _ = train(episodes=500, max_steps=1000, save_model_path="traffic_dqn.pth")
