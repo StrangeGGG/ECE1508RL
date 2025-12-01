@@ -1,80 +1,130 @@
-# ================================================================
-# FULL UPDATED agent.py WITH THROUGHPUT & WAIT-TIME GRAPHS
-# ================================================================
+import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
-import numpy as np
-import matplotlib.pyplot as plt
+import torch.optim as optim
+from torch.distributions import Categorical
 
-from env import TrafficSimulation  # your environment
-import random
 
 class RunningNormalizer:
     """
-    Tracks running mean/var for state normalization.
+    Running mean / variance normalizer for states.
+    This is purely a preprocessing helper and not part of PPO itself.
     """
 
-    def __init__(self, state_size):
+    def __init__(self, state_size: int, eps: float = 1e-8):
         self.state_size = state_size
+        self.eps = eps
+
         self.mean = np.zeros(state_size, dtype=np.float32)
         self.var = np.ones(state_size, dtype=np.float32)
-        self.count = 1e-4  # avoid div-by-zero
+        self.count = eps  # avoid divide-by-zero at the very beginning
 
     def update(self, x: np.ndarray):
-        assert x.shape[0] == self.state_size
-        self.count += 1.0
-        delta = x - self.mean
-        self.mean += delta / self.count
-        delta2 = x - self.mean
-        self.var = ((self.count - 1) * self.var + delta * delta2) / self.count
+        """
+        Update running statistics from a batch of states x (shape [B, state_size]).
+        """
+        x = np.asarray(x, dtype=np.float32)
+        if x.ndim == 1:
+            x = x[None, :]
+
+        batch_mean = np.mean(x, axis=0)
+        batch_var = np.var(x, axis=0)
+        batch_count = x.shape[0]
+
+        # From OpenAI Baselines running mean/std
+        delta = batch_mean - self.mean
+        total_count = self.count + batch_count
+
+        new_mean = self.mean + delta * batch_count / total_count
+        m_a = self.var * self.count
+        m_b = batch_var * batch_count
+        M2 = m_a + m_b + delta**2 * self.count * batch_count / total_count
+        new_var = M2 / total_count
+
+        self.mean = new_mean
+        self.var = new_var
+        self.count = total_count
 
     def normalize(self, x: np.ndarray) -> np.ndarray:
-        return (x - self.mean) / (np.sqrt(self.var) + 1e-8)
+        x = np.asarray(x, dtype=np.float32)
+        return (x - self.mean) / (np.sqrt(self.var) + self.eps)
 
-    def __call__(self, x: np.ndarray) -> np.ndarray:
-        self.update(x)
+    def __call__(self, x: np.ndarray, update: bool = True) -> np.ndarray:
+        """
+        Convenience wrapper: optionally update stats, then return normalized x.
+        """
+        if update:
+            self.update(x)
         return self.normalize(x)
 
-class PPOActorCritic(nn.Module):
-    def __init__(self, state_size, action_size, hidden_size=128):
+
+class ActorCritic(nn.Module):
+    """
+    Shared-torso actor-critic network used by PPO.
+    """
+
+    def __init__(self, state_size: int, action_size: int, hidden_sizes=(128, 128)):
         super().__init__()
+        layers = []
+        last_size = state_size
+        for h in hidden_sizes:
+            layers.append(nn.Linear(last_size, h))
+            layers.append(nn.Tanh())
+            last_size = h
+        self.shared = nn.Sequential(*layers)
 
-        self.fc1 = nn.Linear(state_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, hidden_size)
-        self.fc3 = nn.Linear(hidden_size, hidden_size)
+        self.policy_head = nn.Linear(last_size, action_size)
+        self.value_head = nn.Linear(last_size, 1)
 
-        self.policy_head = nn.Linear(hidden_size, action_size)
-        self.value_head = nn.Linear(hidden_size, 1)
-
-    def forward(self, state):
-        x = F.relu(self.fc1(state))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-
+    def forward(self, x):
+        x = self.shared(x)
         logits = self.policy_head(x)
-        value = self.value_head(x)
+        value = self.value_head(x).squeeze(-1)
         return logits, value
 
+
 class PPOAgent:
+    """
+    PPO agent for discrete action spaces.
+
+    Usage pattern (pseudo-code):
+
+        env = TrafficRLWrapper(...)
+        state = env.reset()
+        agent = PPOAgent(state_size=len(state), action_size=4, ...)
+
+        for each training step:
+            action = agent.select_action(state)
+            next_state, reward, _, info = env.step(action)
+            done = ...  # e.g. horizon-based
+            agent.store_reward(reward, done)
+            state = next_state
+
+            if agent.buffer_size() >= steps_per_batch:
+                agent.update()
+    """
+
     def __init__(
         self,
-        state_size,
-        action_size,
-        gamma=0.99,
-        lam=0.95,
-        lr=1e-3,
-        clip_ratio=0.1,
-        update_epochs=5,
-        minibatch_size=64,
-        reward_scale=1e-3,
-        entropy_coef=0.05,
-        max_grad_norm=0.5,
+        state_size: int,
+        action_size: int,
+        gamma: float = 0.99,
+        lam: float = 0.95,
+        lr: float = 3e-4,
+        clip_ratio: float = 0.2,
+        update_epochs: int = 10,
+        minibatch_size: int = 64,
+        reward_scale: float = 1.0,
+        entropy_coef: float = 0.01,
+        value_coef: float = 0.5,
+        max_grad_norm: float = 0.5,
+        use_state_norm: bool = True,
+        hidden_sizes=(128, 128),
+        device: str | None = None,
     ):
         self.state_size = state_size
         self.action_size = action_size
-
         self.gamma = gamma
         self.lam = lam
         self.clip_ratio = clip_ratio
@@ -82,347 +132,200 @@ class PPOAgent:
         self.minibatch_size = minibatch_size
         self.reward_scale = reward_scale
         self.entropy_coef = entropy_coef
+        self.value_coef = value_coef
         self.max_grad_norm = max_grad_norm
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = torch.device(device)
 
-        self.ac = PPOActorCritic(state_size, action_size).to(self.device)
+        # Networks
+        self.ac = ActorCritic(state_size, action_size, hidden_sizes).to(self.device)
         self.optimizer = optim.Adam(self.ac.parameters(), lr=lr)
 
-        self.states = []
-        self.actions = []
-        self.log_probs = []
-        self.values = []
-        self.rewards = []
-        self.dones = []
+        # Optional state normalizer
+        self.use_state_norm = use_state_norm
+        self.state_normalizer = (
+            RunningNormalizer(state_size) if use_state_norm else None
+        )
 
-        self.losses = []
+        # Rollout storage
+        self.states: list[np.ndarray] = []
+        self.actions: list[int] = []
+        self.log_probs: list[float] = []
+        self.rewards: list[float] = []
+        self.dones: list[bool] = []
+        self.values: list[float] = []
 
-        self.state_normalizer = RunningNormalizer(state_size)
+    # ---------------- interaction API ----------------
 
-    def select_action(self, state_np: np.ndarray) -> int:
-        norm_state = self.state_normalizer(state_np)
+    def select_action(self, state: np.ndarray) -> int:
+        """
+        Given a state (np.array of shape [state_size]), sample an action from π_θ.
+        Also stores the transition pieces needed for PPO update.
+        """
+        state = np.asarray(state, dtype=np.float32)
+
+        if self.use_state_norm:
+            # update running stats with the *current* state, then normalize
+            norm_state = self.state_normalizer(state, update=True)
+        else:
+            norm_state = state
+
         state_tensor = torch.from_numpy(norm_state).float().to(self.device).unsqueeze(0)
 
-        logits, value = self.ac(state_tensor)
+        with torch.no_grad():
+            logits, value = self.ac(state_tensor)
+            dist = Categorical(logits=logits)
+            action = dist.sample()
+            log_prob = dist.log_prob(action)
 
-        probs = F.softmax(logits, dim=-1)
-        dist = torch.distributions.Categorical(probs)
-        action = dist.sample()
+        action_int = int(action.item())
 
-        self.states.append(norm_state.copy())
-        self.actions.append(action.item())
-        self.log_probs.append(dist.log_prob(action).item())
+        # Store transition pieces
+        self.states.append(norm_state)  # store normalized state if using normalizer
+        self.actions.append(action_int)
+        self.log_probs.append(log_prob.item())
         self.values.append(value.item())
 
-        return action.item()
+        return action_int
 
-    def store_reward(self, reward, done):
-        self.rewards.append(reward * self.reward_scale)
-        self.dones.append(done)
-
-    def compute_gae(self):
-        advantages = []
-        gae = 0.0
-        values = self.values + [0.0]
-
-        for t in reversed(range(len(self.rewards))):
-            delta = (
-                self.rewards[t]
-                + self.gamma * values[t + 1] * (1 - self.dones[t])
-                - values[t]
-            )
-            gae = delta + self.gamma * self.lam * (1 - self.dones[t]) * gae
-            advantages.insert(0, gae)
-
-        returns = [adv + val for adv, val in zip(advantages, self.values)]
-        advantages = np.array(advantages, dtype=np.float32)
-        returns = np.array(returns, dtype=np.float32)
-
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-
-        return advantages, returns
-
-    def update(self):
-        if len(self.states) == 0:
-            return
-
-        advantages, returns = self.compute_gae()
-
-        states_np = np.array(self.states, dtype=np.float32)
-        actions_np = np.array(self.actions, dtype=np.int64)
-        old_log_probs_np = np.array(self.log_probs, dtype=np.float32)
-
-        states = torch.from_numpy(states_np).to(self.device)
-        actions = torch.from_numpy(actions_np).to(self.device)
-        old_log_probs = torch.from_numpy(old_log_probs_np).to(self.device)
-        returns = torch.from_numpy(returns).to(self.device)
-        advantages = torch.from_numpy(advantages).to(self.device)
-
-        dataset_size = len(states)
-
-        for _ in range(self.update_epochs):
-            idx = np.random.permutation(dataset_size)
-            for start in range(0, dataset_size, self.minibatch_size):
-                end = start + self.minibatch_size
-                batch_idx = idx[start:end]
-
-                batch_states = states[batch_idx]
-                batch_actions = actions[batch_idx]
-                batch_old_log_probs = old_log_probs[batch_idx]
-                batch_returns = returns[batch_idx]
-                batch_advantages = advantages[batch_idx]
-
-                logits, values = self.ac(batch_states)
-                dist = torch.distributions.Categorical(F.softmax(logits, dim=-1))
-                new_log_probs = dist.log_prob(batch_actions)
-
-                ratio = torch.exp(new_log_probs - batch_old_log_probs)
-
-                surr1 = ratio * batch_advantages
-                surr2 = torch.clamp(
-                    ratio, 1.0 - self.clip_ratio, 1.0 + self.clip_ratio
-                ) * batch_advantages
-                policy_loss = -torch.min(surr1, surr2).mean()
-
-                value_pred = values.squeeze(-1)
-                value_loss = 0.5 * (value_pred - batch_returns).pow(2).clamp(max=10.0).mean()
-
-                entropy = dist.entropy().mean()
-                loss = policy_loss + value_loss - self.entropy_coef * entropy
-
-                self.optimizer.zero_grad()
-                loss.backward()
-                nn.utils.clip_grad_norm_(self.ac.parameters(), self.max_grad_norm)
-                self.optimizer.step()
-
-                self.losses.append(loss.item())
-
-        self.states.clear()
-        self.actions.clear()
-        self.log_probs.clear()
-        self.values.clear()
-        self.rewards.clear()
-        self.dones.clear()
+    def store_reward(self, reward: float, done: bool):
+        """
+        Store reward and done flag for the last action taken.
+        """
+        self.rewards.append(float(reward) * self.reward_scale)
+        self.dones.append(bool(done))
 
     def buffer_size(self) -> int:
         return len(self.rewards)
 
+    def clear_buffer(self):
+        self.states.clear()
+        self.actions.clear()
+        self.log_probs.clear()
+        self.rewards.clear()
+        self.dones.clear()
+        self.values.clear()
+
+    # ---------------- PPO update ----------------
+
+    def _compute_returns_and_advantages(self):
+        """
+        Compute GAE advantages and bootstrap returns from the stored rollout.
+        Assumes the rollout is a sequence of full episodes or fixed-length segments
+        where 'done' is True at episode boundaries you define.
+        """
+        rewards = np.array(self.rewards, dtype=np.float32)
+        values = np.array(self.values, dtype=np.float32)
+        dones = np.array(self.dones, dtype=np.float32)
+
+        T = len(rewards)
+        advantages = np.zeros(T, dtype=np.float32)
+        last_adv = 0.0
+        last_value = 0.0  # we treat the value after terminal as 0
+
+        for t in reversed(range(T)):
+            mask = 1.0 - dones[t]  # 0 if done at t, 1 otherwise
+            delta = rewards[t] + self.gamma * last_value * mask - values[t]
+            last_adv = delta + self.gamma * self.lam * last_adv * mask
+            advantages[t] = last_adv
+            last_value = values[t]
+
+        returns = advantages + values
+        # Normalize advantages for better conditioning
+        adv_mean = advantages.mean()
+        adv_std = advantages.std() + 1e-8
+        advantages = (advantages - adv_mean) / adv_std
+        return returns, advantages
+
+    def update(self):
+        """
+        Run PPO update using all data currently in the buffer.
+        After update, the buffer is cleared.
+        """
+        if self.buffer_size() == 0:
+            return
+
+        # Convert buffers to tensors
+        states = torch.tensor(np.array(self.states), dtype=torch.float32).to(self.device)
+        actions = torch.tensor(self.actions, dtype=torch.long).to(self.device)
+        old_log_probs = torch.tensor(self.log_probs, dtype=torch.float32).to(self.device)
+
+        returns, advantages = self._compute_returns_and_advantages()
+        returns = torch.tensor(returns, dtype=torch.float32).to(self.device)
+        advantages = torch.tensor(advantages, dtype=torch.float32).to(self.device)
+
+        dataset_size = states.size(0)
+        batch_size = self.minibatch_size
+
+        for _ in range(self.update_epochs):
+            # Shuffle indices for mini-batches
+            indices = torch.randperm(dataset_size)
+            for start in range(0, dataset_size, batch_size):
+                end = start + batch_size
+                mb_idx = indices[start:end]
+
+                mb_states = states[mb_idx]
+                mb_actions = actions[mb_idx]
+                mb_old_log_probs = old_log_probs[mb_idx]
+                mb_returns = returns[mb_idx]
+                mb_advantages = advantages[mb_idx]
+
+                logits, values = self.ac(mb_states)
+                dist = Categorical(logits=logits)
+                new_log_probs = dist.log_prob(mb_actions)
+                entropy = dist.entropy().mean()
+
+                # PPO ratio
+                ratio = torch.exp(new_log_probs - mb_old_log_probs)
+
+                # Clipped surrogate objective
+                surr1 = ratio * mb_advantages
+                surr2 = torch.clamp(
+                    ratio, 1.0 - self.clip_ratio, 1.0 + self.clip_ratio
+                ) * mb_advantages
+                policy_loss = -torch.min(surr1, surr2).mean()
+
+                # Value function loss (MSE)
+                value_loss = F.mse_loss(values, mb_returns)
+
+                loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                if self.max_grad_norm is not None:
+                    torch.nn.utils.clip_grad_norm_(self.ac.parameters(), self.max_grad_norm)
+                self.optimizer.step()
+
+        # Clear rollout buffer after update
+        self.clear_buffer()
+
+    # ---------------- save / load ----------------
+
     def save(self, path: str):
-        torch.save(self.ac.state_dict(), path)
+        torch.save(
+            {
+                "ac_state_dict": self.ac.state_dict(),
+                "normalizer_mean": None
+                if not self.use_state_norm
+                else self.state_normalizer.mean,
+                "normalizer_var": None
+                if not self.use_state_norm
+                else self.state_normalizer.var,
+                "normalizer_count": None
+                if not self.use_state_norm
+                else self.state_normalizer.count,
+            },
+            path,
+        )
 
     def load(self, path: str):
-        state_dict = torch.load(path, map_location=self.device)
-        self.ac.load_state_dict(state_dict)
+        checkpoint = torch.load(path, map_location=self.device)
+        self.ac.load_state_dict(checkpoint["ac_state_dict"])
 
-
-class SmartTrafficLightControllerPPO:
-
-    def __init__(self, simulation: TrafficSimulation):
-        self.simulation = simulation
-        self.state_size = 24
-        self.action_size = 4
-
-        self.agent = PPOAgent(self.state_size, self.action_size)
-
-        self.current_phase = 0
-        self.phase_duration = 0
-        self.min_phase_duration = 10
-        self.max_phase_duration = 60
-
-        self.scores = []
-        self.avg_scores = []
-
-        # NEW METRIC LOGGING ARRAYS
-        self.throughput_history = []
-        self.waiting_time_history = []
-
-    def get_state(self) -> np.ndarray:
-        metrics = self.simulation.metrics_collector.get_metrics()
-        queue_lengths = metrics["queue_lengths"]
-
-        state = []
-
-        for direction in ["north", "south", "east", "west"]:
-            for lane_type in ["straight", "left"]:
-                key = f"{direction}_{lane_type}"
-
-                queue_len = queue_lengths[key]
-
-                lane_vehicles = [
-                    v
-                    for v in self.simulation.vehicles.values()
-                    if v.direction == direction
-                    and v.lane_type == lane_type
-                    and not v.passed
-                    and not v.collided
-                ]
-
-                if lane_vehicles:
-                    avg_wait = np.mean([v.waiting_time for v in lane_vehicles])
-                    vehicle_count = len(lane_vehicles)
-                else:
-                    avg_wait = 0.0
-                    vehicle_count = 0
-
-                state.extend([queue_len, avg_wait, vehicle_count])
-
-        return np.array(state, dtype=np.float32)
-
-    def calculate_reward(self, metrics, old_metrics=None) -> float:
-        reward = 0.0
-        reward += metrics["throughput"] * 10.0
-        reward -= metrics["average_waiting_time"] * 0.1
-
-        total_queue = sum(metrics["queue_lengths"].values())
-        reward -= total_queue * 0.2
-
-        if old_metrics is not None and self.phase_duration == 1:
-            reward -= 0.1
-
-        if self.phase_duration >= self.min_phase_duration:
-            old_total_passed = old_metrics["total_vehicles_passed"] if old_metrics else 0
-            vehicles_passed = metrics["total_vehicles_passed"] - old_total_passed
-            reward += vehicles_passed * 2.0
-
-        return reward
-
-    def train(self, episodes=200, max_steps=1000, steps_per_batch=4096):
-        print("Starting PPO training with batch updates...")
-
-        for ep in range(episodes):
-            self.simulation.reset()
-            self.current_phase = 0
-            self.phase_duration = 0
-
-            state = self.get_state()
-            total_reward = 0.0
-            old_metrics = None
-
-            # METRICS FOR THIS EPISODE
-            ep_through_list = []
-            ep_wait_list = []
-
-            for step in range(max_steps):
-                action = self.agent.select_action(state)
-
-                if self.phase_duration >= self.min_phase_duration:
-                    if action != self.current_phase:
-                        self.current_phase = action
-                        self.phase_duration = 0
-
-                _, metrics = self.simulation.step(self.current_phase)
-                self.phase_duration += 1
-
-                if self.phase_duration >= self.max_phase_duration:
-                    self.current_phase = (self.current_phase + 1) % self.action_size
-                    self.phase_duration = 0
-
-                reward = self.calculate_reward(metrics, old_metrics)
-                total_reward += reward
-
-                # ---- COLLECT METRICS ----
-                ep_through_list.append(metrics["throughput"])
-                ep_wait_list.append(metrics["average_waiting_time"])
-
-                next_state = self.get_state()
-                done = (step == max_steps - 1)
-
-                self.agent.store_reward(reward, done)
-
-                state = next_state
-                old_metrics = metrics.copy()
-
-                if done:
-                    break
-
-                if self.agent.buffer_size() >= steps_per_batch:
-                    self.agent.update()
-
-            # End of episode logging
-            self.scores.append(total_reward)
-            avg_reward = np.mean(self.scores[-50:])
-            self.avg_scores.append(avg_reward)
-
-            # FINAL METRIC AGGREGATION
-            mean_throughput = np.mean(ep_through_list)
-            mean_wait = np.mean(ep_wait_list)
-            self.throughput_history.append(mean_throughput)
-            self.waiting_time_history.append(mean_wait)
-
-            print(
-                f"[Episode {ep}] Reward={total_reward:.2f} | Avg(50)={avg_reward:.2f} | "
-                f"Through={mean_throughput:.2f} | Wait={mean_wait:.2f} | Buffer={self.agent.buffer_size()}"
-            )
-
-        if self.agent.buffer_size() > 0:
-            print("Final PPO update on remaining batch...")
-            self.agent.update()
-
-        return self.scores, self.avg_scores, self.throughput_history, self.waiting_time_history
-
-
-def main():
-    random.seed(0)
-    np.random.seed(0)
-    torch.manual_seed(0)
-
-    simulation = TrafficSimulation()
-    controller = SmartTrafficLightControllerPPO(simulation)
-
-    print("Training PPO traffic-light controller (batch PPO)...")
-    scores, avg_scores, through, wait = controller.train(
-        episodes=200,
-        max_steps=1000,
-        steps_per_batch=4096,
-    )
-
-    # -----------------------------
-    # PLOT TRAINING CURVES
-    # -----------------------------
-    plt.figure(figsize=(10, 4))
-    plt.plot(scores, label="Episode Reward", alpha=0.6)
-    plt.plot(avg_scores, label="Avg Reward (50 episodes)", linewidth=2)
-    plt.xlabel("Episode")
-    plt.ylabel("Total Reward")
-    plt.title("PPO Training Curve (Batch Updates)")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig("ppo_training_batch.png", dpi=300)
-    plt.show()
-
-    # -----------------------------
-    # NEW: THROUGHPUT GRAPH
-    # -----------------------------
-    plt.figure(figsize=(10, 4))
-    plt.plot(through, color="blue", label="Throughput")
-    plt.xlabel("Episode")
-    plt.ylabel("Vehicles Passed")
-    plt.title("Throughput Over Episodes")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig("ppo_throughput.png", dpi=300)
-    plt.show()
-
-    # -----------------------------
-    # NEW: WAITING TIME GRAPH
-    # -----------------------------
-    plt.figure(figsize=(10, 4))
-    plt.plot(wait, color="red", label="Avg Waiting Time")
-    plt.xlabel("Episode")
-    plt.ylabel("Seconds")
-    plt.title("Average Waiting Time Over Episodes")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig("ppo_waiting_time.png", dpi=300)
-    plt.show()
-
-    controller.agent.save("traffic_ppo_batch_model.pth")
-    print("Saved PPO model to 'traffic_ppo_batch_model.pth'")
-
-
-if __name__ == "__main__":
-    main()
+        if self.use_state_norm and self.state_normalizer is not None:
+            if checkpoint.get("normalizer_mean") is not None:
+                self.state_normalizer.mean = checkpoint["normalizer_mean"]
+                self.state_normalizer.var = checkpoint["normalizer_var"]
+                self.state_normalizer.count = checkpoint["normalizer_count"]
