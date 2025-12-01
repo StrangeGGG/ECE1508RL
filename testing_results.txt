@@ -1,6 +1,0 @@
-TRAFFIC SIMULATION RESULTS
-==================================================
-Test completed. Total reward: -3139.61
-Average waiting time: 65.89
-Average throughput: 0.0354
-Number of phase changes: 10

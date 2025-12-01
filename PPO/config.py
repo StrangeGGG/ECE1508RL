@@ -20,5 +20,5 @@ SPAWN_SPEED = 2.0 # initial speed when spawning
 
 # Traffic light parameters
 YELLOW_DURATION = 3 # duration of yellow light in steps
-MIN_GREEN_DURATION = 0 # min duration of green light in steps
-MAX_GREEN_DURATION = 60 # max duration of green light in steps
+MIN_PHASE_DURATION = 0 # min duration of green light in steps
+MAX_PHASE_DURATION = 60 # max duration of green light in steps

@@ -14,12 +14,9 @@ from config import (
     ACCELERATION,
     DECELERATION,
     MAX_VEHICLES_PER_LANE,
+    MAX_PHASE_DURATION,
+    MIN_PHASE_DURATION,
 )
-
-
-# ============================================================
-# Vehicle
-# ============================================================
 
 class Vehicle:
     """
@@ -295,7 +292,7 @@ class TrafficMetricsCollector:
             'total_vehicles_passed': 0,     # cumulative
         }
         
-        self.each_lane_count = {}
+        self.each_lane_count = {}           # each_lane_key -> number of vehicles => used for spawning
         
     def update_metrics(
         self,
@@ -371,7 +368,6 @@ class TrafficMetricsCollector:
 class TrafficSimulation:
     """
     traffic simulation for one intersection.
-
     - Four directions: north, south, east, west
     - Two movement types: straight, left
     """
@@ -537,8 +533,8 @@ class TrafficRLWrapper:
     """
 
     def __init__(self, sim: TrafficSimulation = None,
-                 min_phase_steps: int = 0,
-                 max_phase_steps: int = 5):
+                 min_phase_steps: int = MIN_PHASE_DURATION,
+                 max_phase_steps: int = MAX_PHASE_DURATION):
         self.sim = sim if sim is not None else TrafficSimulation()
 
         self.action_size = 4  # 0:NS left, 1:EW left, 2:NS straight, 3:EW straight
@@ -565,15 +561,9 @@ class TrafficRLWrapper:
         return self.get_state()
 
     def step(self, action: int):
-        # -----------------------------
-        # 1) phase update
-        # -----------------------------
-        # enforce min green
         if self.phase_duration < self.min_phase_steps:
-            # ignore new action, keep the current phase
             pass
         else:
-            # allow phase change
             if action != self.current_signal:
                 self.current_signal = int(action)
                 self.phase_duration = 0
@@ -596,16 +586,20 @@ class TrafficRLWrapper:
 
     def get_state(self):
         """
-        Build 29-dim state from current metrics & signal phase.
+        Build 29-dim state.
+        For each of 8 lanes (N/S/E/W x straight/left):
+            [queue_len_norm, avg_wait_norm, vehicle_count_norm] => 24 dims
+        + 4-d one-hot of current phase
+        + 1-d normalized phase duration
         """
         metrics = self.sim.get_metrics()
         queue_lengths = metrics.get('queue_lengths', {})
         lane_wait = metrics.get('lane_waiting_times', {})
         lane_counts = metrics.get('lane_counts', {})
-
-        MAX_QUEUE = 20.0
-        MAX_WAIT = 300.0
-        MAX_COUNT = 20.0
+        
+        MAX_QUEUE = MAX_VEHICLES_PER_LANE*(NUM_LANES_PER_DIRECTION_IN_LEFT+NUM_LANES_PER_DIRECTION_IN_STRAIGHT)*4
+        MAX_WAIT = 500
+        MAX_COUNT = MAX_VEHICLES_PER_LANE*(NUM_LANES_PER_DIRECTION_IN_LEFT+NUM_LANES_PER_DIRECTION_IN_STRAIGHT)*4
 
         state = []
 

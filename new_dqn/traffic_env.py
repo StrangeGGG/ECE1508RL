@@ -27,16 +27,16 @@ class Vehicle:
 
     def set_initial_position(self):
         if self.direction == 'north':
-            self.x = -7 if self.lane_type == 'straight' else -20
+            self.x = 7 if not self.lane_type == 'straight' else 20
             self.y = -80
         elif self.direction == 'south':
-            self.x = 7 if self.lane_type == 'straight' else 20
+            self.x = -7 if not self.lane_type == 'straight' else -20
             self.y = 80
         elif self.direction == 'east':
-            self.y = -7 if self.lane_type == 'straight' else -20
+            self.y = -7 if not self.lane_type == 'straight' else -20
             self.x = -80
         elif self.direction == 'west':
-            self.y = 7 if self.lane_type == 'straight' else 20
+            self.y = 7 if not self.lane_type == 'straight' else 20
             self.x = 80
 
     def _crossed_centerline(self) -> bool:
