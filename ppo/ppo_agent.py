@@ -188,7 +188,7 @@ class PPOTrafficLightController:
             lr=1e-4,
             gamma=0.99,
             gae_lambda=0.95,
-            eps_clip=0.1,
+            eps_clip=0.2,
             k_epochs=8,
             entropy_coef=0.02,
         )

@@ -25,10 +25,10 @@ class Vehicle:
         self.prev_x, self.prev_y = self.x, self.y
 
         # FASTER vehicles so they can actually reach and clear the junction
-        self.speed = 2.5        # initial speed
-        self.max_speed = 4.0    # higher top speed
-        self.acceleration = 0.2
-        self.deceleration = 0.4
+        self.speed = 1.5        # initial speed
+        self.max_speed = 2.5    # higher top speed
+        self.acceleration = 0.1
+        self.deceleration = 0.3
 
     def set_initial_position(self):
         """
@@ -37,7 +37,7 @@ class Vehicle:
         NOTE: start closer to the intersection than before (±40 instead of ±80)
         so vehicles can reach and pass the junction in a 400–800 step episode.
         """
-        start_dist = 40.0
+        start_dist = 80.0
 
         if self.direction == 'north':
             if self.lane_type == 'straight':
@@ -159,13 +159,13 @@ class Vehicle:
         """Check if vehicle is approaching the intersection"""
         # Slightly tighten the "approach" band now that roads are shorter
         if self.direction == 'north':
-            return self.y < -5
+            return self.y < -10
         elif self.direction == 'south':
-            return self.y > 5
+            return self.y > 10
         elif self.direction == 'east':
-            return self.x < -5
+            return self.x < -10
         elif self.direction == 'west':
-            return self.x > 5
+            return self.x > 10
         return False
 
     def in_intersection(self):
@@ -190,7 +190,7 @@ class Vehicle:
 
         Thresholds reduced from ±60 to ±40 to fit the shorter roads.
         """
-        exit_dist = 40.0
+        exit_dist = 60.0
 
         if self.direction in ['north', 'south']:
             if (self.direction == 'north' and self.y > exit_dist) or \
@@ -298,13 +298,13 @@ class TrafficMetricsCollector:
 
         # Slightly narrower waiting zone to match shorter roads
         if direction == 'north':
-            return -30 < y < -5
+            return -40 < y < -5
         elif direction == 'south':
-            return 5 < y < 30
+            return 5 < y < 40
         elif direction == 'east':
-            return -30 < x < -5
+            return -40 < x < -5
         elif direction == 'west':
-            return 5 < x < 30
+            return 5 < x < 40
         return False
 
     def get_metrics(self):
@@ -348,10 +348,10 @@ class TrafficSimulation:
 
         # MUCH HIGHER spawn probabilities so that we actually see traffic
         self.spawn_probabilities = {
-            'north': {'straight': 0.03, 'left': 0.015},
-            'south': {'straight': 0.03, 'left': 0.015},
-            'east':  {'straight': 0.03, 'left': 0.015},
-            'west':  {'straight': 0.03, 'left': 0.015}
+            'north': {'straight': 0.05, 'left': 0.02},
+            'south': {'straight': 0.05, 'left': 0.02},
+            'east':  {'straight': 0.05, 'left': 0.02},
+            'west':  {'straight': 0.05, 'left': 0.02}
         }
 
         # Cap how many vehicles are allowed waiting in a lane
