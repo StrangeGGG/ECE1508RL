@@ -16,7 +16,8 @@ We first estimate the traffic flow and predefined each traffic light duration ti
 
 ### 2.1.2 Round-Robin
 We implement a simple round-robin controller as a non-adaptive baseline. The intersection alternates between the East–West and North–South phases in a fixed cyclic order, assigning equal green durations to each phase. This ensures fairness between the two directions but does not respond to varying traffic densities.
-<img width="791" height="184" alt="RoundRobinExample" src="https://github.com/user-attachments/assets/544b5671-2c9a-4edb-8836-b7fa91922160" />
+<img width="812" height="182" alt="rr_example" src="https://github.com/user-attachments/assets/9dc92d99-753d-4965-90c9-76b1f91ba27a" />
+
 
 ## 2.2 RL Models
 ### 2.2.1 Deep-Q Network (DQN)
