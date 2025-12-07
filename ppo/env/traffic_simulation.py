@@ -348,10 +348,10 @@ class TrafficSimulation:
 
         # MUCH HIGHER spawn probabilities so that we actually see traffic
         self.spawn_probabilities = {
-            'north': {'straight': 0.05, 'left': 0.02},
-            'south': {'straight': 0.05, 'left': 0.02},
-            'east':  {'straight': 0.05, 'left': 0.02},
-            'west':  {'straight': 0.05, 'left': 0.02}
+            'north': {'straight': 0.02, 'left': 0.01},
+            'south': {'straight': 0.02, 'left': 0.01},
+            'east':  {'straight': 0.02, 'left': 0.01},
+            'west':  {'straight': 0.02, 'left': 0.01}
         }
 
         # Cap how many vehicles are allowed waiting in a lane
