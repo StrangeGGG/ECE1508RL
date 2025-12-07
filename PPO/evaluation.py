@@ -7,7 +7,7 @@ from agent import PPOAgent
 
 
 def evaluate_ppo_on_traffic(
-    model_path: str = r"PPO_result/balance_queue/ppo_traffic.pth",
+    model_path: str = r"doc/PPO/balance_queue/ppo_traffic.pth",
     num_episodes: int = 10,
     max_steps_per_episode: int = 1000,
     min_phase_steps: int = 0,

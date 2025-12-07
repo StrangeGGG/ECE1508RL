@@ -53,6 +53,9 @@ For PPO simulation, run `PPO/train.py`. <br> You can modify the training environ
 <img width="1800" height="600" alt="realistic" src="https://github.com/user-attachments/assets/90750f91-4452-468c-857e-8ed1bb8d3746" />
 
 ### 4.1.2 Baseline - Round-Robin
+<img width="1800" height="600" alt="Round Robin Baseline Model" src="doc/Round_Robin/round_robin_baseline.png" />
+<br>
+
 ### 4.2.1 RL Models - DQN
 #### Ideal Environment
 <img width="1000" height="400" alt="dqn_ideal_A2" src="https://github.com/user-attachments/assets/42ae5dbb-030a-436b-b225-87f4277923a9" />
@@ -74,3 +77,25 @@ For PPO simulation, run `PPO/train.py`. <br> You can modify the training environ
 <img width="1000" height="400" alt="dqn_realistic_D2" src="https://github.com/user-attachments/assets/f72edade-4183-4d76-89c8-03516aa187d5" />
 
 ### 4.2.2 RL Models - PPO
+#### Reward Function E - stable result
+<img width="1000" height="400" alt="PPO_stable_throughput" src="doc/PPO/PPO_result_min_0/ppo_throughput_curve.png" />
+<img width="1000" height="400" alt="PPO_stable_waiting_time" src="doc/PPO/PPO_result_min_0/ppo_waiting_time_curve.png" />
+<img width="1000" height="400" alt="PPO_stable_evaluation_result" src="doc/PPO/PPO_result_min_0/ppo_evaluation_result.png" />
+
+#### Reward Function F - delay(heavy waiting time penalty)-oriented result
+<img width="1000" height="400" alt="PPO_stable_throughput" src="doc/PPO/max_waiting/ppo_throughput_curve.png" />
+<img width="1000" height="400" alt="PPO_stable_waiting_time" src="doc/PPO/max_waiting/ppo_waiting_time_curve.png" />
+<img width="1000" height="400" alt="PPO_stable_evaluation_result" src="doc/PPO/max_waiting/image.png" />
+
+#### Reward Function G - default(heavy queue length penalty)-oriented result
+<img width="1000" height="400" alt="PPO_stable_throughput" src="doc/PPO/default(heavy_queue_penalty)/ppo_throughput_curve.png" />
+<img width="1000" height="400" alt="PPO_stable_waiting_time" src="doc/PPO/default(heavy_queue_penalty)/ppo_waiting_time_curve.png" />
+<img width="1000" height="400" alt="PPO_stable_evaluation_result" src="doc/PPO/default(heavy_queue_penalty)/image.png" />
+
+#### Reward Function G (failed example) - imbalanced queue length penalty result
+<img width="1000" height="400" alt="PPO_stable_throughput" src="doc/PPO/balance_queue/ppo_throughput_curve.png" />
+<img width="1000" height="400" alt="PPO_stable_waiting_time" src="doc/PPO/balance_queue/ppo_waiting_time_curve.png" />
+<img width="1000" height="400" alt="PPO_stable_evaluation_result" src="doc/PPO/balance_queue/image.png" />
+
+#### PPO different reward shaping comparsion
+<img width="1000" height="400" alt="PPO_stable_evaluation_result" src="doc/PPO/PPO_reward_shaping.png"/>
