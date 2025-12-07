@@ -32,6 +32,11 @@ PPO is a popular on-policy reinforcement learning algorithm which optimizes the 
 For fixed-timing simulation, run `self_designed_env/simulation.py`. <br> You can switch between ideal/realistic environment by choosing simulation function in `run_simulation()`.
 
 ### Round-Robin
+
+For round-robin simulation, run  `PPO/round_robin.py`
+
+### Round-Robin
 ### DQN
 For DQN simulation, run `DQN/train.py`. <br> You can switch between ideal/realistic environment by choosing simulation function in `train()`. <br> You may also choose different reward function in `TrafficEngine_realistic._compute_reward()` in `DQN/traffic_env.py`
 ### PPO
+For PPO simulation, run `PPO/train.py`. <br> You can modify the training environment by editing `PPO/config.py`. <br> You can also tune the hyperparameter by editing `PPOagent()`'s input variables inside the `train.py` file at line 37. 
