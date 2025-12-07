@@ -3,27 +3,23 @@ import torch
 import matplotlib.pyplot as plt
 
 from traffic_env import TrafficRLWrapper
+#from edit_env import TrafficRLWrapper
 from agent import PPOAgent
 
 
 def train_ppo_on_traffic(
     num_episodes: int = 200,
     max_steps_per_episode: int = 1000,
-    steps_per_batch: int = 5000,
+    steps_per_batch: int = 2048,
     min_phase_steps: int = 0,
-    max_phase_steps: int = 5,
+    max_phase_steps: int = 60,
     seed: int = 42,
     model_path: str = "ppo_traffic.pth",
 ):
-    # -----------------------
-    # Reproducibility
-    # -----------------------
+
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    # -----------------------
-    # Environment & Agent
-    # -----------------------
     env = TrafficRLWrapper(
         min_phase_steps=min_phase_steps,
         max_phase_steps=max_phase_steps,
@@ -65,28 +61,19 @@ def train_ppo_on_traffic(
         state = env.reset()
         ep_return = 0.0
 
-        # We'll average wait/throughput over the episode manually
         wait_accum = 0.0
         throughput_accum = 0.0
         wait_count = 0
         throughput_count = 0
 
         for t in range(max_steps_per_episode):
-            # Select action from current policy
             action = agent.select_action(state)  # int in [0, 3]
-
             next_state, reward, done_env, info = env.step(action)
-
-            # We treat episodes as fixed-horizon; env.done is always False
             done = done_env or (t == max_steps_per_episode - 1)
-
-            # Store reward and done for PPO (for GAE)
             agent.store_reward(reward, done)
-
             ep_return += reward
             total_steps += 1
 
-            # Track metrics from `info`
             if "average_waiting_time" in info:
                 wait_accum += info["average_waiting_time"]
                 wait_count += 1
@@ -96,14 +83,12 @@ def train_ppo_on_traffic(
 
             state = next_state
 
-            # When we have enough steps, run a PPO update
             if agent.buffer_size() >= steps_per_batch:
                 agent.update()
 
             if done:
                 break
 
-        # Episode-level stats
         episode_returns.append(ep_return)
         mean_wait = wait_accum / wait_count if wait_count > 0 else 0.0
         mean_throughput = (
@@ -120,31 +105,24 @@ def train_ppo_on_traffic(
             f"mean_throughput={mean_throughput:8.3f}"
         )
 
-    # Final update on any leftover data
     if agent.buffer_size() > 0:
         agent.update()
 
-    # Save trained model
+
     agent.save(model_path)
     print(f"\nTraining finished. Model saved to {model_path}")
 
-    # -----------------------
-    # Save metrics as .npy
-    # -----------------------
-    np.save("episode_returns.npy", np.array(episode_returns, dtype=np.float32))
-    np.save("episode_mean_wait.npy", np.array(episode_mean_wait, dtype=np.float32))
-    np.save(
-        "episode_mean_throughput.npy",
-        np.array(episode_mean_throughput, dtype=np.float32),
-    )
-    print("Saved metrics: episode_returns.npy, episode_mean_wait.npy, episode_mean_throughput.npy")
+    # np.save("episode_returns.npy", np.array(episode_returns, dtype=np.float32))
+    # np.save("episode_mean_wait.npy", np.array(episode_mean_wait, dtype=np.float32))
+    # np.save(
+    #     "episode_mean_throughput.npy",
+    #     np.array(episode_mean_throughput, dtype=np.float32),
+    # )
+    # print("Saved metrics: episode_returns.npy, episode_mean_wait.npy, episode_mean_throughput.npy")
 
-    # -----------------------
-    # Plot training curves
-    # -----------------------
     episodes = np.arange(1, num_episodes + 1)
 
-    # 1) Return curve
+    # 1) Return 
     plt.figure()
     plt.plot(episodes, episode_returns)
     plt.xlabel("Episode")

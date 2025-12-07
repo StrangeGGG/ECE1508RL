@@ -63,13 +63,7 @@ class Vehicle:
         self.set_initial_position()
         self.prev_x, self.prev_y = self.x, self.y
 
-    # ---------------- position & geometry helpers ----------------
-
     def set_initial_position(self):
-        """
-        Your updated geometry: lane_index shifts the position
-        relative to the centerline by LANE_WIDTH.
-        """
 
         if self.direction == 'north':
             # coming from bottom to top, y starts negative
@@ -98,10 +92,6 @@ class Vehicle:
         )
 
     def distance_to_stop_line(self) -> float:
-        """
-        Signed distance along lane to the stop line. >0 = before the line,
-        0 at the line, <0 = already past the line.
-        """
         if self.direction == 'north':
             # coming from y < 0 moving +y, stop line at -INTERSECTION_SIZE
             return -INTERSECTION_SIZE - self.y
@@ -153,9 +143,6 @@ class Vehicle:
         elif self.direction in ['west']:
             return (self.x <= INTERSECTION_SIZE)
         return False
-        
-
-    # ---------------- signal logic ----------------
 
     def should_wait(self, current_signal: int) -> bool:
         """
@@ -215,9 +202,6 @@ class Vehicle:
         return False
 
     def turn_left(self):
-        """
-        Simplified left turn: rotate direction by 90 degrees and keep position.
-        """
         if self.direction == 'north':
             self.direction = 'west'
         elif self.direction == 'south':
@@ -229,9 +213,6 @@ class Vehicle:
         self.has_turned = True
         
     def check_passed(self):
-        """
-        Mark vehicle as passed once it goes far beyond the intersection.
-        """
         limit = SPAWN_DISTANCE_TO_INTERSECTION + 10.0  
         if self.direction == 'north' and self.y > limit:
             self.passed = True
@@ -405,8 +386,6 @@ class TrafficSimulation:
         self.metrics_collector.reset()
         return self.get_observation(), self.get_metrics()
 
-    # ---------------- vehicle management ----------------
-
     def add_vehicle(self, direction: str, lane_type: str, lane_index: int):
         v = Vehicle(
             self.next_vehicle_id,
@@ -527,14 +506,14 @@ class TrafficRLWrapper:
     State:
         For each of 8 lanes (N/S/E/W x straight/left):
             [queue_len_norm, avg_wait_norm, vehicle_count_norm] => 24 dims
-        + 4-d one-hot of current phase
-        + 1-d normalized phase duration
-        => total 29 dims
+        +   one-hot of current phase
+        => total 28 dims
     """
 
     def __init__(self, sim: TrafficSimulation = None,
                  min_phase_steps: int = MIN_PHASE_DURATION,
-                 max_phase_steps: int = MAX_PHASE_DURATION):
+                 max_phase_steps: int = MAX_PHASE_DURATION    # max_phase_duration doesn't use
+                 ):
         self.sim = sim if sim is not None else TrafficSimulation()
 
         self.action_size = 4  # 0:NS left, 1:EW left, 2:NS straight, 3:EW straight
@@ -586,11 +565,10 @@ class TrafficRLWrapper:
 
     def get_state(self):
         """
-        Build 29-dim state.
+        Build 28-dim state.
         For each of 8 lanes (N/S/E/W x straight/left):
             [queue_len_norm, avg_wait_norm, vehicle_count_norm] => 24 dims
         + 4-d one-hot of current phase
-        + 1-d normalized phase duration
         """
         metrics = self.sim.get_metrics()
         queue_lengths = metrics.get('queue_lengths', {})
@@ -619,8 +597,8 @@ class TrafficRLWrapper:
         phase_vec[self.current_signal] = 1.0
         state.extend(phase_vec)
 
-        norm_phase_dur = min(self.phase_duration, self.max_phase_steps) / float(self.max_phase_steps)
-        state.append(norm_phase_dur)
+        #norm_phase_dur = min(self.phase_duration, self.max_phase_steps) / float(self.max_phase_steps)
+        #state.append(norm_phase_dur)
 
         return np.array(state, dtype=np.float32)
 
@@ -638,14 +616,48 @@ class TrafficRLWrapper:
         w_old = last_metrics.get('average_waiting_time', 0.0)
         w_new = metrics.get('average_waiting_time', 0.0)
         wait_inc = w_new - w_old
-
-        queue_penalty = -0.03 * queue_inc
-        wait_penalty = -0.06 * wait_inc
-
+        
         passed_old = last_metrics.get('total_vehicles_passed', 0)
         passed_new = metrics.get('total_vehicles_passed', 0)
-        passed_reward = (passed_new - passed_old) * 1.0
+        
+        # default
+        # queue_penalty = -0.03 * q_new
+        # wait_penalty = -0.06 * w_new
+        # passed_reward = (passed_new-passed_old) * 1
+        
+        # stable
+        # queue_penalty = -0.03 * queue_inc
+        # wait_penalty = -0.06 * wait_inc
+        # passed_reward = (passed_new - passed_old) * 1.0
+        
+        # max queue length penalty
+        # queue_penalty = -3 * queue_inc
+        # wait_penalty = -0.06 * wait_inc
+        # passed_reward = (passed_new - passed_old) * 1.0
+        
+        
+        # max waiting time penalty
+        queue_penalty = -0.03 * queue_inc
+        wait_penalty = -0.6 * wait_inc
+        passed_reward = (passed_new - passed_old) * 1
+        
+        # max throughput penalty
+        # queue_penalty = -0.03 * queue_inc
+        # wait_penalty = -0.06 * wait_inc
+        # passed_reward = (passed_new - passed_old) * 10.0
+        
+        # balanced queue
+        # q_dict = metrics.get('queue_lengths', {})
+        # queues = np.array(list(q_dict.values()), dtype=np.float32) if q_dict else np.array([0.0])
 
-        reward = queue_penalty + wait_penalty + passed_reward
-        reward = float(np.clip(reward, -5.0, 5.0))
+        # mean_queue = queues.mean()
+        # queue_imbalanced_penalty = np.mean(np.sqrt(np.abs(queues - mean_queue)))
+        
+        # queue_penalty = -0.03 * queue_imbalanced_penalty
+        # wait_penalty = -0.06 * wait_inc
+        # passed_reward = (passed_new - passed_old) * 1.0
+     
+    
+        reward = queue_penalty + wait_penalty + passed_reward 
+        #reward = float(np.clip(reward, -5.0, 5.0))
         return reward

@@ -5,25 +5,17 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
 
-
+#technique mention in the tut, which will make the model trained smooth and stable
 class RunningNormalizer:
-    """
-    Running mean / variance normalizer for states.
-    This is purely a preprocessing helper and not part of PPO itself.
-    """
-
     def __init__(self, state_size: int, eps: float = 1e-8):
         self.state_size = state_size
         self.eps = eps
 
         self.mean = np.zeros(state_size, dtype=np.float32)
         self.var = np.ones(state_size, dtype=np.float32)
-        self.count = eps  # avoid divide-by-zero at the very beginning
+        self.count = eps 
 
     def update(self, x: np.ndarray):
-        """
-        Update running statistics from a batch of states x (shape [B, state_size]).
-        """
         x = np.asarray(x, dtype=np.float32)
         if x.ndim == 1:
             x = x[None, :]
@@ -32,7 +24,6 @@ class RunningNormalizer:
         batch_var = np.var(x, axis=0)
         batch_count = x.shape[0]
 
-        # From OpenAI Baselines running mean/std
         delta = batch_mean - self.mean
         total_count = self.count + batch_count
 
@@ -51,19 +42,12 @@ class RunningNormalizer:
         return (x - self.mean) / (np.sqrt(self.var) + self.eps)
 
     def __call__(self, x: np.ndarray, update: bool = True) -> np.ndarray:
-        """
-        Convenience wrapper: optionally update stats, then return normalized x.
-        """
+        
         if update:
             self.update(x)
         return self.normalize(x)
-
-
-class ActorCritic(nn.Module):
-    """
-    Shared-torso actor-critic network used by PPO.
-    """
-
+    
+class PolicyNet(nn.Module):
     def __init__(self, state_size: int, action_size: int, hidden_sizes=(128, 128)):
         super().__init__()
         layers = []
@@ -73,38 +57,44 @@ class ActorCritic(nn.Module):
             layers.append(nn.Tanh())
             last_size = h
         self.shared = nn.Sequential(*layers)
+        self.action_head = nn.Linear(last_size, action_size)
 
-        self.policy_head = nn.Linear(last_size, action_size)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.shared(x)
+        logits = self.action_head(x)
+        return logits
+
+    def get_log_prob(self, states: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+        logits = self.forward(states)
+        dist = Categorical(logits=logits)
+        log_probs = dist.log_prob(actions)
+        return log_probs
+
+    def select_action(self, state_tensor: torch.Tensor):
+        logits = self.forward(state_tensor)
+        dist = Categorical(logits=logits)
+        action = dist.sample()
+        log_prob = dist.log_prob(action)
+        return int(action.item()), float(log_prob.item())
+
+class ValueNet(nn.Module):
+    def __init__(self, state_size: int, hidden_sizes=(128, 128)):
+        super().__init__()
+        layers = []
+        last_size = state_size
+        for h in hidden_sizes:
+            layers.append(nn.Linear(last_size, h))
+            layers.append(nn.Tanh())
+            last_size = h
+        self.shared = nn.Sequential(*layers)
         self.value_head = nn.Linear(last_size, 1)
 
-    def forward(self, x):
-        x = self.shared(x)
-        logits = self.policy_head(x)
-        value = self.value_head(x).squeeze(-1)
-        return logits, value
-
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        v = self.shared(x)
+        v = self.value_head(v).squeeze(-1)
+        return v
 
 class PPOAgent:
-    """
-    PPO agent for discrete action spaces.
-
-    Usage pattern (pseudo-code):
-
-        env = TrafficRLWrapper(...)
-        state = env.reset()
-        agent = PPOAgent(state_size=len(state), action_size=4, ...)
-
-        for each training step:
-            action = agent.select_action(state)
-            next_state, reward, _, info = env.step(action)
-            done = ...  # e.g. horizon-based
-            agent.store_reward(reward, done)
-            state = next_state
-
-            if agent.buffer_size() >= steps_per_batch:
-                agent.update()
-    """
-
     def __init__(
         self,
         state_size: int,
@@ -114,14 +104,15 @@ class PPOAgent:
         lr: float = 3e-4,
         clip_ratio: float = 0.2,
         update_epochs: int = 10,
-        minibatch_size: int = 64,
+        minibatch_size: int = 128,
         reward_scale: float = 1.0,
-        entropy_coef: float = 0.01,
-        value_coef: float = 0.5,
+        entropy_coef: float = 0.02,
+        value_coef: float = 0.5,  
         max_grad_norm: float = 0.5,
         use_state_norm: bool = True,
         hidden_sizes=(128, 128),
         device: str | None = None,
+        l2_reg: float = 1e-3,
     ):
         self.state_size = state_size
         self.action_size = action_size
@@ -134,16 +125,18 @@ class PPOAgent:
         self.entropy_coef = entropy_coef
         self.value_coef = value_coef
         self.max_grad_norm = max_grad_norm
+        self.l2_reg = l2_reg
 
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = torch.device(device)
 
-        # Networks
-        self.ac = ActorCritic(state_size, action_size, hidden_sizes).to(self.device)
-        self.optimizer = optim.Adam(self.ac.parameters(), lr=lr)
+        self.policy_net = PolicyNet(state_size, action_size, hidden_sizes).to(self.device)
+        self.value_net = ValueNet(state_size, hidden_sizes).to(self.device)
 
-        # Optional state normalizer
+        self.optimizer_policy = optim.Adam(self.policy_net.parameters(), lr=lr)
+        self.optimizer_value = optim.Adam(self.value_net.parameters(), lr=lr)
+        
         self.use_state_norm = use_state_norm
         self.state_normalizer = (
             RunningNormalizer(state_size) if use_state_norm else None
@@ -157,36 +150,25 @@ class PPOAgent:
         self.dones: list[bool] = []
         self.values: list[float] = []
 
-    # ---------------- interaction API ----------------
-
     def select_action(self, state: np.ndarray) -> int:
-        """
-        Given a state (np.array of shape [state_size]), sample an action from π_θ.
-        Also stores the transition pieces needed for PPO update.
-        """
+        
         state = np.asarray(state, dtype=np.float32)
 
-        if self.use_state_norm:
-            # update running stats with the *current* state, then normalize
+        if self.use_state_norm and self.state_normalizer is not None:
             norm_state = self.state_normalizer(state, update=True)
         else:
             norm_state = state
 
-        state_tensor = torch.from_numpy(norm_state).float().to(self.device).unsqueeze(0)
+        state_tensor = torch.tensor(norm_state, dtype=torch.float32, device=self.device).unsqueeze(0)
 
         with torch.no_grad():
-            logits, value = self.ac(state_tensor)
-            dist = Categorical(logits=logits)
-            action = dist.sample()
-            log_prob = dist.log_prob(action)
+            action_int, log_prob = self.policy_net.select_action(state_tensor)
+            value = self.value_net(state_tensor).item()
 
-        action_int = int(action.item())
-
-        # Store transition pieces
-        self.states.append(norm_state)  # store normalized state if using normalizer
+        self.states.append(norm_state)  
         self.actions.append(action_int)
-        self.log_probs.append(log_prob.item())
-        self.values.append(value.item())
+        self.log_probs.append(log_prob)
+        self.values.append(value)
 
         return action_int
 
@@ -198,9 +180,12 @@ class PPOAgent:
         self.dones.append(bool(done))
 
     def buffer_size(self) -> int:
+        """
+        Numinibatcher of time steps currently stored in the rollout buffer.
+        """
         return len(self.rewards)
 
-    def clear_buffer(self):
+    def _clear_buffer(self):
         self.states.clear()
         self.actions.clear()
         self.log_probs.clear()
@@ -208,46 +193,42 @@ class PPOAgent:
         self.dones.clear()
         self.values.clear()
 
-    # ---------------- PPO update ----------------
-
     def _compute_returns_and_advantages(self):
         """
-        Compute GAE advantages and bootstrap returns from the stored rollout.
-        Assumes the rollout is a sequence of full episodes or fixed-length segments
-        where 'done' is True at episode boundaries you define.
+        Compute GAE advantages and returns from the current buffer.
         """
         rewards = np.array(self.rewards, dtype=np.float32)
+        dones = np.array(self.dones, dtype=np.bool_)
         values = np.array(self.values, dtype=np.float32)
-        dones = np.array(self.dones, dtype=np.float32)
 
         T = len(rewards)
         advantages = np.zeros(T, dtype=np.float32)
         last_adv = 0.0
-        last_value = 0.0  # we treat the value after terminal as 0
+        last_value = 0.0  
 
         for t in reversed(range(T)):
-            mask = 1.0 - dones[t]  # 0 if done at t, 1 otherwise
-            delta = rewards[t] + self.gamma * last_value * mask - values[t]
-            last_adv = delta + self.gamma * self.lam * last_adv * mask
+            mask = 1.0 - float(dones[t])
+            r_t = rewards[t]
+            v_t = values[t]
+
+            delta = r_t + self.gamma * last_value * mask - v_t
+            last_adv = delta + self.gamma * self.lam * mask * last_adv
             advantages[t] = last_adv
-            last_value = values[t]
+
+            last_value = v_t
 
         returns = advantages + values
-        # Normalize advantages for better conditioning
+
         adv_mean = advantages.mean()
         adv_std = advantages.std() + 1e-8
         advantages = (advantages - adv_mean) / adv_std
+
         return returns, advantages
 
     def update(self):
-        """
-        Run PPO update using all data currently in the buffer.
-        After update, the buffer is cleared.
-        """
         if self.buffer_size() == 0:
             return
 
-        # Convert buffers to tensors
         states = torch.tensor(np.array(self.states), dtype=torch.float32).to(self.device)
         actions = torch.tensor(self.actions, dtype=torch.long).to(self.device)
         old_log_probs = torch.tensor(self.log_probs, dtype=torch.float32).to(self.device)
@@ -260,61 +241,66 @@ class PPOAgent:
         batch_size = self.minibatch_size
 
         for _ in range(self.update_epochs):
-            # Shuffle indices for mini-batches
-            indices = torch.randperm(dataset_size)
+            
+            indices = torch.randperm(dataset_size, device=self.device)
             for start in range(0, dataset_size, batch_size):
                 end = start + batch_size
-                mb_idx = indices[start:end]
+                minibatch_idx = indices[start:end]
 
-                mb_states = states[mb_idx]
-                mb_actions = actions[mb_idx]
-                mb_old_log_probs = old_log_probs[mb_idx]
-                mb_returns = returns[mb_idx]
-                mb_advantages = advantages[mb_idx]
+                minibatch_states = states[minibatch_idx]
+                minibatch_actions = actions[minibatch_idx]
+                minibatch_old_log_probs = old_log_probs[minibatch_idx]
+                minibatch_returns = returns[minibatch_idx]
+                minibatch_advantages = advantages[minibatch_idx]
+                
+                values_pred = self.value_net(minibatch_states)
+                value_loss = F.mse_loss(values_pred, minibatch_returns)
 
-                logits, values = self.ac(mb_states)
-                dist = Categorical(logits=logits)
-                new_log_probs = dist.log_prob(mb_actions)
-                entropy = dist.entropy().mean()
+                if self.l2_reg > 0.0:
+                    l2 = 0.0
+                    for param in self.value_net.parameters():
+                        l2 = l2 + torch.sum(param.pow(2))
+                    value_loss = value_loss + self.l2_reg * l2
 
-                # PPO ratio
-                ratio = torch.exp(new_log_probs - mb_old_log_probs)
+                self.optimizer_value.zero_grad()
+                value_loss.backward()
+                self.optimizer_value.step()
 
-                # Clipped surrogate objective
-                surr1 = ratio * mb_advantages
-                surr2 = torch.clamp(
-                    ratio, 1.0 - self.clip_ratio, 1.0 + self.clip_ratio
-                ) * mb_advantages
+                new_log_probs = self.policy_net.get_log_prob(minibatch_states, minibatch_actions)
+                ratio = torch.exp(new_log_probs - minibatch_old_log_probs)
+
+                clip_eps = self.clip_ratio
+                surr1 = ratio * minibatch_advantages
+                surr2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * minibatch_advantages
                 policy_loss = -torch.min(surr1, surr2).mean()
 
-                # Value function loss (MSE)
-                value_loss = F.mse_loss(values, mb_returns)
+                logits = self.policy_net(minibatch_states)
+                dist = Categorical(logits=logits)
+                entropy = dist.entropy().mean()
 
-                loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy
+                total_policy_loss = policy_loss - self.entropy_coef * entropy
 
-                self.optimizer.zero_grad()
-                loss.backward()
-                if self.max_grad_norm is not None:
-                    torch.nn.utils.clip_grad_norm_(self.ac.parameters(), self.max_grad_norm)
-                self.optimizer.step()
+                self.optimizer_policy.zero_grad()
+                total_policy_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), self.max_grad_norm)
+                self.optimizer_policy.step()
 
-        # Clear rollout buffer after update
-        self.clear_buffer()
-
-    # ---------------- save / load ----------------
+        self._clear_buffer()
 
     def save(self, path: str):
         torch.save(
             {
-                "ac_state_dict": self.ac.state_dict(),
+                "policy_state_dict": self.policy_net.state_dict(),
+                "value_state_dict": self.value_net.state_dict(),
+                "use_state_norm": self.use_state_norm,
                 "normalizer_mean": None
-                if not self.use_state_norm
+                if not self.use_state_norm or self.state_normalizer is None
                 else self.state_normalizer.mean,
                 "normalizer_var": None
-                if not self.use_state_norm
+                if not self.use_state_norm or self.state_normalizer is None
                 else self.state_normalizer.var,
-                "normalizer_count": None
-                if not self.use_state_norm
+                "normalizer_count": 0
+                if not self.use_state_norm or self.state_normalizer is None
                 else self.state_normalizer.count,
             },
             path,
@@ -322,10 +308,20 @@ class PPOAgent:
 
     def load(self, path: str):
         checkpoint = torch.load(path, map_location=self.device)
-        self.ac.load_state_dict(checkpoint["ac_state_dict"])
 
-        if self.use_state_norm and self.state_normalizer is not None:
-            if checkpoint.get("normalizer_mean") is not None:
-                self.state_normalizer.mean = checkpoint["normalizer_mean"]
-                self.state_normalizer.var = checkpoint["normalizer_var"]
-                self.state_normalizer.count = checkpoint["normalizer_count"]
+        self.policy_net.load_state_dict(checkpoint["policy_state_dict"])
+        self.value_net.load_state_dict(checkpoint["value_state_dict"])
+
+        self.use_state_norm = checkpoint.get("use_state_norm", self.use_state_norm)
+        if self.use_state_norm:
+            if self.state_normalizer is None:
+                self.state_normalizer = RunningNormalizer(self.state_size)
+            mean = checkpoint.get("normalizer_mean", None)
+            var = checkpoint.get("normalizer_var", None)
+            count = checkpoint.get("normalizer_count", None)
+            if mean is not None:
+                self.state_normalizer.mean = mean
+            if var is not None:
+                self.state_normalizer.var = var
+            if count is not None:
+                self.state_normalizer.count = count

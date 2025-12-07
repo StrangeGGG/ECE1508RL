@@ -1,4 +1,6 @@
 # traffic_env configuration parameters
+
+#intersection config parameters
 LANE_WIDTH = 1.0 # gud for position representation (x,y)
 SPAWN_DISTANCE_TO_INTERSECTION = 80.0 # distance from intersection where vehicles spawn
 SPAWN_DISTANCE_TO_CENRELINE = 0.0 # x = 0 & y = 0 is centerline
@@ -14,11 +16,8 @@ vehicle_length = 2.0 # length of vehicle
 MAX_SPEED = 3.0 # max speed of vehicles
 ACCELERATION = 0.5 # acceleration per step
 DECELERATION = 3 # deceleration per step when braking
-
 SPAWN_SPEED = 2.0 # initial speed when spawning
 
-
 # Traffic light parameters
-YELLOW_DURATION = 3 # duration of yellow light in steps
 MIN_PHASE_DURATION = 0 # min duration of green light in steps
-MAX_PHASE_DURATION = 60 # max duration of green light in steps
+MAX_PHASE_DURATION = 60 # max duration of green light in steps, but never used in the end of design
