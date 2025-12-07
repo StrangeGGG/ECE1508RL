@@ -568,6 +568,7 @@ class TrafficEngine_realistic:
         last_total_wait = last_metrics.get('total_wait', 0)
         wait_increase = current_total_wait - last_total_wait
         avg_wait = metrics.get('avg_wait', 0.0)
+        avg_wait_norm = avg_wait / 100.0
 
         current_throughput = metrics.get('throughput', 0)
         last_throughput = last_metrics.get('throughput', 0)
@@ -587,16 +588,17 @@ class TrafficEngine_realistic:
         #          + 1 * current_throughput)
 
         # === C. Delay-oriented reward function===
-        #reward = (-0.2 * avg_wait
-        #          + 0.5 * current_throughput)
+        #reward = (-0.01 * avg_wait_norm
+        #          - 0.05 * wait_increase
+        #          + 1.5 * current_throughput)
 
         # === D. Balanced queue reward function===
         #reward = (-0.05 * total_queue
-        #          - 0.05 * avg_wait
+        #          - 0.01 * avg_wait_norm
         #          - 0.05 * imbalance_penalty
-        #          + 1 * current_throughput)
+        #          + 1.5 * current_throughput)
         
-        return float(np.clip(reward, -2.0, 2.0))
+        return float(np.clip(reward, -5.0, 5.0))
 
     # ------------------ State ------------------
     def get_state(self):
