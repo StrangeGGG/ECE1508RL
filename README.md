@@ -35,7 +35,6 @@ For fixed-timing simulation, run `self_designed_env/simulation.py`. <br> You can
 
 For round-robin simulation, run  `PPO/round_robin.py`
 
-### Round-Robin
 ### DQN
 For DQN simulation, run `DQN/train.py`. <br> You can switch between ideal/realistic environment by choosing simulation function in `train()`. <br> You may also choose different reward function in `TrafficEngine_realistic._compute_reward()` in `DQN/traffic_env.py`
 ### PPO
