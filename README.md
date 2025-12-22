@@ -1,5 +1,7 @@
 # ECE1508RL - Using RL for Traffic Signal Control
 
+## 📄 **Project Report (PDF):** [Open the PDF](./ECE1508RL.pdf)
+
 # 1. Introduction
 The problem of traffic congestion has been a major challenge for many cities in modern days. It results in longer travel time, more fuel consumption, and more CO2 emissions. In major cities, intersections signalized by traffic lights often cause long queues and high waiting times as a result of inefficient traffic light schedules, especially in dynamic and unpredictable traffic conditions. Traditional control strategies are usually static and unable to adapt to the real-time situation of the traffic, causing non-optimal performance when the traffic volumes change during the day.
 
